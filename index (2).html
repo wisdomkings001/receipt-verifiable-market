@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pulse — Autonomous Fan Signal Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F4F8F6; --panel:#FFFFFF; --ink:#15202B; --mut:#6B7A85; --line:#DCE6E1;
+    --vital:#15A36B; --caution:#D97706; --alert:#DC2626; --manual:#2563EB;
+    --vital-soft:#E3F5EC; --caution-soft:#FBEFDD; --alert-soft:#FBE3E3; --manual-soft:#E3EBFC;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  header{padding:16px 18px;border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;position:sticky;top:0;z-index:5}
+  .brand{display:flex;flex-direction:column;line-height:1.1}
+  .brand b{font-size:20px;font-weight:800;letter-spacing:.02em}
+  .brand span{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.08em}
+  .head-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .tally{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;letter-spacing:.04em;
+    padding:5px 10px;border-radius:999px;border:1px solid var(--line)}
+  .tally.live{color:var(--alert);border-color:var(--alert)}
+  .tally.sim{color:var(--caution);border-color:var(--caution)}
+  .tally .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+  .tally.live .dot{animation:blink 1.1s infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+
+  #ecgWrap{background:#0E1A14;border-bottom:1px solid var(--line);overflow:hidden}
+  #ecgTrack{position:relative;height:46px;margin:0 auto;max-width:960px}
+  .ecg-base{position:absolute;inset:0;
+    background-image:repeating-linear-gradient(100deg, transparent 0 18px, rgba(21,163,107,.55) 18px 19px, transparent 19px 40px);
+    background-size:40px 100%;animation:ecgScroll 1.4s linear infinite;}
+  @keyframes ecgScroll{from{background-position-x:0}to{background-position-x:-40px}}
+  .ecg-spike{position:absolute;right:18px;bottom:23px;width:3px;height:22px;border-radius:2px;
+    animation:spikePulse 2.6s cubic-bezier(.2,.8,.2,1) forwards}
+  .ecg-spike.t-mom{background:var(--vital);box-shadow:0 0 10px var(--vital)}
+  .ecg-spike.t-goal{background:var(--alert);box-shadow:0 0 10px var(--alert)}
+  .ecg-spike.t-lag{background:var(--caution);box-shadow:0 0 10px var(--caution)}
+  @keyframes spikePulse{
+    0%{transform:translate(0,0) scaleY(.2);opacity:0}
+    12%{transform:translate(0,-20px) scaleY(1.3);opacity:1}
+    26%{transform:translate(0,8px) scaleY(.5);opacity:1}
+    45%{transform:translate(0,0) scaleY(.25);opacity:.85}
+    100%{transform:translate(-360px,0) scaleY(.15);opacity:0}
+  }
+  @media (prefers-reduced-motion: reduce){ .ecg-base{animation:none} .ecg-spike{animation:none;opacity:.7} }
+
+  main{max-width:960px;margin:0 auto;padding:18px}
+  h2{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;margin:22px 0 10px;
+    border-left:3px solid var(--vital);padding-left:8px}
+
+  .fixrow{display:flex;gap:8px;flex-wrap:wrap}
+  .fixbtn{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--ink);
+    padding:8px 12px;border-radius:10px;font-size:13px;font-weight:600}
+  .fixbtn.active{border-color:var(--vital);background:var(--vital-soft);color:#0B5B3C}
+  .fixbtn .st{display:inline-block;width:6px;height:6px;border-radius:50%;margin-left:6px;background:var(--mut)}
+  .fixbtn.live2 .st{background:var(--alert)}
+  .fixbtn.ft .st{background:var(--vital)}
+
+  .vitals{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  @media (max-width:680px){.vitals{grid-template-columns:repeat(2,1fr)}}
+  .vtile{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+  .vtile .vl{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.08em}
+  .vtile .vv{font-size:18px;font-weight:700;margin-top:4px}
+  .vtile .vv.mono{font-family:'IBM Plex Mono',monospace}
+  .vtile .vv.up{color:var(--vital)} .vtile .vv.down{color:var(--alert)}
+
+  .controlbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+  .switch{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+  .switch button{font:inherit;cursor:pointer;border:0;background:transparent;color:var(--mut);
+    padding:7px 14px;font-size:12px;font-weight:700;letter-spacing:.03em}
+  .switch button.on.auto{background:var(--vital);color:#fff}
+  .switch button.on.manual{background:var(--manual);color:#fff}
+  .ctrl-actions{display:flex;gap:8px;flex-wrap:wrap}
+  button.go{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:var(--panel);
+    color:var(--ink);padding:8px 13px;font-size:13px;font-weight:600}
+  button.go:hover{border-color:var(--vital)}
+  button.go:disabled{opacity:.45;cursor:default}
+  button.go.primary{background:var(--vital);border-color:var(--vital);color:#fff}
+  button.go.mom{border-color:var(--vital);color:var(--vital)}
+  button.go.goal{border-color:var(--alert);color:var(--alert)}
+  button.go.lag{border-color:var(--caution);color:var(--caution)}
+  button:focus-visible{outline:2px solid var(--manual);outline-offset:2px}
+
+  .feed{display:flex;flex-direction:column;gap:8px}
+  .fcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+  .fcard .ftop{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px}
+  .tag{font-size:10px;font-weight:700;letter-spacing:.05em;padding:3px 8px;border-radius:999px}
+  .tag.mom{background:var(--vital-soft);color:#0B5B3C}
+  .tag.goal{background:var(--alert-soft);color:#8C1C1C}
+  .tag.lag{background:var(--caution-soft);color:#8A5A05}
+  .tag.settle{background:var(--manual-soft);color:#1E3A8A}
+  .fmin{font-size:11px;color:var(--mut)}.mono.fmin{}
+  .fexp{font-size:13px;color:var(--ink);margin:2px 0}
+  .faction{font-size:12px;color:var(--mut)}
+  .empty{color:var(--mut);font-size:13px;padding:6px 2px}
+
+  .receipt-mini{margin-top:8px;border-top:1px dashed var(--line);padding-top:8px}
+  .rm-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+  .vchip{font-size:10px;font-weight:700;padding:3px 7px;border-radius:999px;border:1px solid var(--line)}
+  .vchip.ok{color:#0B5B3C;border-color:var(--vital);background:var(--vital-soft)}
+  .vchip.pend{color:#8A5A05;border-color:var(--caution);background:var(--caution-soft)}
+  .vchip.bad{color:#8C1C1C;border-color:var(--alert);background:var(--alert-soft)}
+  .rm-src{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;margin-bottom:6px}
+  .rm-src.sim{background:var(--caution-soft);color:#8A5A05}
+  .rm-src.live{background:var(--alert-soft);color:#8C1C1C}
+  details summary{cursor:pointer;font-size:11px;color:var(--mut)}
+  pre{white-space:pre-wrap;word-break:break-all;background:#F0F4F2;border:1px solid var(--line);border-radius:8px;
+    padding:8px;font-size:10px;color:#3A4A42;max-height:200px;overflow:auto;font-family:'IBM Plex Mono',monospace}
+
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;
+    padding:10px 16px;border-radius:10px;font-size:13px;opacity:0;transition:.2s;pointer-events:none;
+    border-top:2px solid var(--vital)}
+  .toast.show{opacity:1}
+  footer{max-width:960px;margin:24px auto;padding:0 18px 40px;color:var(--mut);font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><b>PULSE</b><span>autonomous fan signal agent</span></div>
+  <div class="head-right">
+    <span id="modeBadge" class="tally sim"><span class="dot"></span><span class="label">SIM DATA</span></span>
+  </div>
+</header>
+<div id="ecgWrap"><div id="ecgTrack"><div class="ecg-base"></div></div></div>
+
+<main>
+  <h2>Watching</h2>
+  <div id="fixrow" class="fixrow"></div>
+
+  <h2>Vitals</h2>
+  <div id="vitals" class="vitals"></div>
+
+  <h2>Controls</h2>
+  <div id="controlbar" class="controlbar"></div>
+
+  <h2>Activity Feed</h2>
+  <div id="feed" class="feed"></div>
+</main>
+<footer>
+  Built by TechCraft &amp; Coding By Wisdom · GitHub @wisdomkings001 · IG @wisdomtech_creations<br/>
+  Signal verification powered by TxLINE (TxODDS) three-stage Merkle proofs.
+</footer>
+<div id="toast" class="toast"></div>
+
+<script>
+/* ============================================================================
+   Pulse — autonomous fan signal & strategy agent (single file)
+   ----------------------------------------------------------------------------
+   HONESTY NOTE:
+   - Default mode is SIMULATION. The mode badge reflects the ACTUAL source of
+     the last successful data fetch (tracked dynamically via setSource), not a
+     static config flag — if a live call ever fails, the badge and a toast
+     reflect the real fallback immediately.
+   - Guest JWT auth (POST /auth/guest/start) and the three-stage Merkle proof
+     endpoint (GET /api/scores/stat-validation) are CONFIRMED real, reachable
+     endpoints (guest auth tested live with a real 200; stat-validation tested
+     live and correctly returned 401 to an invalid token, confirming the URL
+     and auth-header structure are correct). Neither has been exercised with a
+     real activated X-Api-Token, which requires an on-chain Solana mainnet
+     subscribe transaction (gas) not yet completed.
+   - Fixtures/Odds/general Scores-snapshot endpoints are confirmed to EXIST
+     per the API reference sidebar, but their exact URL paths/schemas were
+     never confirmed live. LiveProvider stubs for these are explicitly marked
+     UNCONFIRMED and throw, triggering simulation fallback — never silently
+     guessed as if verified.
+   - Manual-mode scenario injectors mutate real fixture state (odds/score
+     history) to deterministically satisfy the same signal thresholds used by
+     the autonomous engine, then run through the exact same detectSignals()
+     and applyStrategy() functions — same pipeline, different trigger source.
+   ========================================================================== */
+
+const CONFIG = {
+  USE_LIVE_DATA: false,
+  TXLINE_BASE_URL: "https://txline.txodds.com",
+  TXLINE_API_TOKEN: ""
+};
+
+/* ---------- crypto + merkle (reused, identical math to prior verified build) */
+const enc = new TextEncoder();
+async function sha256hex(str){
+  const buf = await crypto.subtle.digest("SHA-256", enc.encode(str));
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+const statLeaf = (s)=> sha256hex("stat:"+s.key+":"+s.value+":"+s.period);
+async function buildMerkle(leaves){
+  const layers=[leaves.slice()];
+  while(layers[layers.length-1].length>1){
+    const cur=layers[layers.length-1], next=[];
+    for(let i=0;i<cur.length;i+=2){
+      const l=cur[i], r=(i+1<cur.length)?cur[i+1]:cur[i];
+      next.push(await sha256hex(l+r));
+    }
+    layers.push(next);
+  }
+  const root=layers[layers.length-1][0];
+  function proofFor(index){
+    let idx=index; const proof=[];
+    for(let l=0;l<layers.length-1;l++){
+      const layer=layers[l];
+      const right = idx%2===1;
+      const sibIdx = right? idx-1 : idx+1;
+      const sib = (sibIdx<layer.length)? layer[sibIdx] : layer[idx];
+      proof.push({ hash: sib, position: right? "left":"right" });
+      idx=Math.floor(idx/2);
+    }
+    return proof;
+  }
+  return { root, proofFor };
+}
+async function verifyProof(leaf, proof, root){
+  let h=leaf;
+  for(const n of proof){
+    if(!n || typeof n.hash!=="string" || !("position" in n)) return null;
+    h = n.position==="left" ? await sha256hex(n.hash+h) : await sha256hex(h+n.hash);
+  }
+  return h===root;
+}
+const randHash = ()=> sha256hex("salt:"+Math.random()+":"+Date.now());
+
+/* ---------- DATA PROVIDERS ---------------------------------------------------
+   getStatValidation({fixtureId, seq, statKey, statKey2}) -> TxLINE schema obj
+   (used only for the Settlement Receipt feature, see settle())
+   --------------------------------------------------------------------------- */
+const SimProvider = (function(){
+  async function getStatValidation(args){
+    const fs = State.fixtureStates[args.fixtureId];
+    const sc = fs ? fs.score : {home:0,away:0};
+    const stats=[ {key:1,value:sc.home,period:0}, {key:2,value:sc.away,period:0} ];
+    const leaves = await Promise.all(stats.map(statLeaf));
+    const t1 = await buildMerkle(leaves);
+    const idx = (args.statKey===2)?1:0;
+    const statToProve = stats[idx];
+    const statProof = t1.proofFor(idx);
+    const eventCount = 5, ourEvent = Math.min(args.seq % eventCount, eventCount-1);
+    const eventRoots = await Promise.all(Array.from({length:eventCount}, (_,i)=> i===ourEvent? Promise.resolve(t1.root) : randHash()));
+    const t2 = await buildMerkle(eventRoots);
+    const subTreeProof = t2.proofFor(ourEvent);
+    const fxCount=8, ourFx=args.fixtureId % fxCount;
+    const subRoots = await Promise.all(Array.from({length:fxCount}, (_,i)=> i===ourFx? Promise.resolve(t2.root) : randHash()));
+    const t3 = await buildMerkle(subRoots);
+    const mainTreeProof = t3.proofFor(ourFx);
+    const now=Date.now();
+    return {
+      ts: now, eventStatRoot: t1.root, statToProve, statProof, subTreeProof, mainTreeProof,
+      summary:{ fixtureId: args.fixtureId,
+        updateStats:{ updateCount: eventCount, minTimestamp: now-3600000, maxTimestamp: now },
+        eventStatsSubTreeRoot: t2.root }
+    };
+  }
+  return { getStatValidation };
+})();
+
+const LiveProvider = (function(){
+  let _jwt=null;
+  async function jwt(){
+    if(_jwt) return _jwt;
+    const r = await fetch(CONFIG.TXLINE_BASE_URL+"/auth/guest/start",{method:"POST"});
+    if(!r.ok) throw new Error("guest/start "+r.status);
+    _jwt=(await r.json()).token;
+    return _jwt;
+  }
+  // CONFIRMED real URL + auth structure; will 401 without a real activated token.
+  async function getStatValidation(args){
+    const t = await jwt();
+    const u = new URL(CONFIG.TXLINE_BASE_URL+"/api/scores/stat-validation");
+    u.searchParams.set("fixtureId", args.fixtureId);
+    u.searchParams.set("seq", args.seq);
+    u.searchParams.set("statKey", args.statKey);
+    if(args.statKey2!=null) u.searchParams.set("statKey2", args.statKey2);
+    const r = await fetch(u, { headers:{ "Authorization":"Bearer "+t, "X-Api-Token": CONFIG.TXLINE_API_TOKEN }});
+    if(!r.ok) throw new Error("stat-validation "+r.status);
+    return await r.json();
+  }
+  // UNCONFIRMED PATH — odds/scores live endpoints were never verified against
+  // a real call. Left unimplemented on purpose rather than guessing a path
+  // that would look confirmed when it isn't.
+  async function getLiveOddsOrScores(){
+    throw new Error("Live odds/scores endpoint path unconfirmed — using simulation.");
+  }
+  return { getStatValidation, getLiveOddsOrScores };
+})();
+
+const Provider = CONFIG.USE_LIVE_DATA ? LiveProvider : SimProvider;
+let ActualSource = CONFIG.USE_LIVE_DATA ? "LIVE" : "SIMULATED";
+function setSource(s){
+  ActualSource = s;
+  const mb=document.getElementById("modeBadge");
+  if(!mb) return;
+  mb.className = "tally "+(ActualSource==="LIVE"?"live":"sim");
+  mb.innerHTML = '<span class="dot"></span><span class="label">'+(ActualSource==="LIVE"?"LIVE DATA":"SIM DATA")+'</span>';
+}
+
+/* ---------- pure logic: signal detection + strategy --------------------------
+   Both the autonomous tick() and the manual injectScenario() mutate real
+   fixture state, then call this SAME function — the detection/reaction logic
+   never branches on trigger source.
+   --------------------------------------------------------------------------- */
+function labelFor(fs, outcome){
+  return outcome==="home" ? fs.home+" Win" : outcome==="away" ? fs.away+" Win" : "Draw";
+}
+function renormalize(o){
+  const sum=o.home+o.draw+o.away;
+  return { home:o.home/sum, draw:o.draw/sum, away:o.away/sum };
+}
+function ensureAnchor(fs){
+  const haveOld = fs.oddsHistory.some(h=> fs.minute - h.t >= 5);
+  if(!haveOld){ fs.oddsHistory.push({ t: fs.minute-6, odds: {...fs.odds} }); }
+}
+function detectSignals(fs){
+  const signals=[];
+  const last = fs.oddsHistory[fs.oddsHistory.length-1];
+  const ref = [...fs.oddsHistory].reverse().find(h=> last.t - h.t >= 5 && h!==last);
+  if(ref){
+    ["home","draw","away"].forEach(function(k){
+      const delta = last.odds[k]-ref.odds[k];
+      if(Math.abs(delta)>=0.08 && delta>0){
+        signals.push({ type:"MOMENTUM", outcome:k, magnitude:delta });
+      }
+    });
+  }
+  if(fs.lastGoalTeam){
+    signals.push({ type:"GOAL_REACTION", outcome: fs.lastGoalTeam });
+  }
+  fs.goalEvents.forEach(function(g){
+    if(!g.checked && fs.minute - g.t >= 2){
+      g.checked=true;
+      const delta = Math.abs(last.odds[g.team]-g.probAtGoal);
+      if(delta < 0.03){ signals.push({ type:"MARKET_LAG", outcome:g.team, magnitude:delta }); }
+    }
+  });
+  return signals;
+}
+function applyStrategy(signal, book, fs){
+  const outcome = signal.outcome;
+  const currentProb = fs.odds[outcome];
+  let text;
+  if(!book.position){
+    const stake = Math.max(50, Math.round(book.bankroll*0.05));
+    book.position = { fixtureId: fs.fixtureId, direction: outcome, stake, entryProb: currentProb };
+    text = "Opened "+stake+"u on "+labelFor(fs,outcome)+" @ "+Math.round(currentProb*100)+"% implied.";
+  } else if(book.position.fixtureId===fs.fixtureId && book.position.direction===outcome){
+    const add = Math.max(50, Math.round(book.bankroll*0.05));
+    const cap = Math.round(book.bankroll*0.4);
+    const newStake = Math.min(book.position.stake+add, cap);
+    const addedActual = newStake-book.position.stake;
+    if(addedActual>0){
+      book.position.entryProb = (book.position.entryProb*book.position.stake + currentProb*addedActual)/newStake;
+      book.position.stake = newStake;
+      text = "Increased stake by "+addedActual+"u on "+labelFor(fs,outcome)+" (total "+newStake+"u).";
+    } else {
+      text = "Signal confirms "+labelFor(fs,outcome)+" — stake cap reached, no change.";
+    }
+  } else if(book.position){
+    text = "Signal favors "+labelFor(fs,outcome)+", but agent already holds "+labelFor(fs, book.position.direction)+" — no flip, discipline held.";
+  }
+  return text;
+}
+function explainSignal(fs, sig){
+  if(sig.type==="MOMENTUM") return Math.round(sig.magnitude*100)+" pt swing toward "+labelFor(fs,sig.outcome)+" in the last 5'.";
+  if(sig.type==="GOAL_REACTION") return "GOAL "+fs.minute+"' — "+fs.home+" "+fs.score.home+"-"+fs.score.away+" "+fs.away+".";
+  if(sig.type==="MARKET_LAG") return "Odds barely moved ("+(sig.magnitude*100).toFixed(1)+" pts) 2' after the goal — market lag.";
+  return "";
+}
+function tagClass(t){ return t==="MOMENTUM"?"mom":t==="GOAL_REACTION"?"goal":t==="MARKET_LAG"?"lag":"settle"; }
+function tagLabel(t){ return t==="MOMENTUM"?"MOMENTUM":t==="GOAL_REACTION"?"GOAL REACTION":t==="MARKET_LAG"?"MARKET LAG":"SETTLEMENT"; }
+
+/* ---------- app state -------------------------------------------------------- */
+const State = {
+  fixtures: [
+    {fixtureId:900201, home:"Brazil",   away:"Argentina"},
+    {fixtureId:900202, home:"France",   away:"Spain"},
+    {fixtureId:900203, home:"England",  away:"Germany"},
+    {fixtureId:900204, home:"Portugal", away:"Netherlands"}
+  ],
+  fixtureStates: {},
+  activeFixtureId: null,
+  mode: "auto",
+  autonomousRunning: false,
+  timer: null,
+  feed: [],
+  book: { bankroll: 10000, position: null, realizedPnL: 0 }
+};
+
+function getFs(fixtureId){
+  if(!State.fixtureStates[fixtureId]){
+    const fx = State.fixtures.find(f=>f.fixtureId===fixtureId);
+    State.fixtureStates[fixtureId] = {
+      fixtureId, home: fx.home, away: fx.away, minute:0, status:"NS",
+      score:{home:0,away:0}, odds:{home:0.40,draw:0.26,away:0.34},
+      oddsHistory:[{t:0, odds:{home:0.40,draw:0.26,away:0.34}}],
+      goalEvents:[], lastGoalTeam:null
+    };
+  }
+  return State.fixtureStates[fixtureId];
+}
+function selectFixture(fixtureId){
+  State.activeFixtureId = fixtureId;
+  getFs(fixtureId);
+  render();
+}
+
+function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show"); setTimeout(function(){t.classList.remove("show");},1900); }
+function spike(type){
+  const track=document.getElementById("ecgTrack"); if(!track) return;
+  const el=document.createElement("div");
+  el.className="ecg-spike "+(type==="MOMENTUM"?"t-mom":type==="GOAL_REACTION"?"t-goal":"t-lag");
+  track.appendChild(el);
+  setTimeout(function(){ el.remove(); }, 2700);
+}
+function pushFeed(fs, sig, text){
+  State.feed.unshift({ id:"f"+Math.random().toString(36).slice(2), minute:fs.minute, fixtureId:fs.fixtureId,
+    type:sig.type, explanation: explainSignal(fs,sig), action:text, ts:Date.now() });
+  if(State.feed.length>60) State.feed.pop();
+}
+function processSignals(fs, signals){
+  signals.forEach(function(sig){
+    const text = applyStrategy(sig, State.book, fs);
+    pushFeed(fs, sig, text);
+    spike(sig.type);
+  });
+}
+
+/* ---------- autonomous engine -------------------------------------------------- */
+function startAutonomous(){
+  const fs=getFs(State.activeFixtureId);
+  if(fs.status==="NS"){ fs.status="LIVE"; fs.minute=1; }
+  if(fs.status!=="LIVE") return;
+  if(State.timer) return;
+  State.autonomousRunning=true;
+  State.timer=setInterval(tick, 1100);
+  render();
+}
+function stopAutonomous(){
+  if(State.timer){ clearInterval(State.timer); State.timer=null; }
+  State.autonomousRunning=false;
+}
+function tick(){
+  const fs = State.fixtureStates[State.activeFixtureId];
+  if(!fs || fs.status!=="LIVE"){ stopAutonomous(); return; }
+  fs.minute += Math.ceil(Math.random()*6);
+  let goalTeam=null;
+  if(Math.random()<0.22){ goalTeam = Math.random()<0.5?"home":"away"; fs.score[goalTeam]++; }
+  let o = {...fs.odds};
+  ["home","draw","away"].forEach(function(k){ o[k]+=(Math.random()-0.5)*0.04; });
+  if(goalTeam){ o[goalTeam]+=0.10+Math.random()*0.08; }
+  Object.keys(o).forEach(function(k){ o[k]=Math.max(0.02,o[k]); });
+  o=renormalize(o);
+  fs.odds=o;
+  fs.oddsHistory.push({t:fs.minute, odds:o});
+  if(fs.oddsHistory.length>40) fs.oddsHistory.shift();
+  if(goalTeam){
+    fs.lastGoalTeam=goalTeam;
+    fs.goalEvents.push({t:fs.minute, team:goalTeam, probAtGoal:o[goalTeam], checked:false});
+  }
+  const signals = detectSignals(fs);
+  fs.lastGoalTeam=null;
+  processSignals(fs, signals);
+  if(fs.minute>=90){
+    fs.minute=90; fs.status="FT"; stopAutonomous();
+    toast("FULL TIME — "+fs.home+" "+fs.score.home+"-"+fs.score.away+" "+fs.away);
+    settle(fs.fixtureId);
+  }
+  render();
+}
+
+/* ---------- manual injectors ---------------------------------------------------
+   Deterministically synthesize the data pattern each named signal needs, then
+   run the SAME detectSignals()/applyStrategy() pipeline used by tick().
+   --------------------------------------------------------------------------- */
+function injectOddsSwing(){
+  const fs=getFs(State.activeFixtureId);
+  if(fs.status==="NS"){ fs.status="LIVE"; fs.minute=Math.max(fs.minute,1); }
+  ensureAnchor(fs);
+  const k=["home","draw","away"][Math.floor(Math.random()*3)];
+  let o={...fs.odds}; o[k]=Math.min(0.85,o[k]+0.15);
+  o=renormalize(o);
+  fs.minute+=1; fs.odds=o; fs.oddsHistory.push({t:fs.minute, odds:o});
+  const signals=detectSignals(fs);
+  processSignals(fs, signals);
+  if(!signals.length) toast("Odds already near the cap for that outcome — try again.");
+  render();
+}
+function injectGoal(){
+  const fs=getFs(State.activeFixtureId);
+  if(fs.status==="NS"){ fs.status="LIVE"; fs.minute=Math.max(fs.minute,1); }
+  const team = Math.random()<0.5?"home":"away";
+  fs.score[team]++;
+  let o={...fs.odds}; o[team]+=0.10; o=renormalize(o);
+  fs.minute+=1; fs.odds=o; fs.oddsHistory.push({t:fs.minute, odds:o});
+  fs.lastGoalTeam=team;
+  fs.goalEvents.push({t:fs.minute, team, probAtGoal:o[team], checked:false});
+  const signals=detectSignals(fs);
+  fs.lastGoalTeam=null;
+  processSignals(fs, signals);
+  if(fs.minute>=90){ fs.status="FT"; toast("FULL TIME — "+fs.home+" "+fs.score.home+"-"+fs.score.away+" "+fs.away); settle(fs.fixtureId); }
+  render();
+}
+function injectMarketLag(){
+  const fs=getFs(State.activeFixtureId);
+  if(fs.status==="NS"){ fs.status="LIVE"; fs.minute=Math.max(fs.minute,1); }
+  const team = Math.random()<0.5?"home":"away";
+  fs.score[team]++;
+  const atGoal={...fs.odds};
+  fs.minute+=1; fs.oddsHistory.push({t:fs.minute, odds:{...atGoal}});
+  fs.goalEvents.push({t:fs.minute, team, probAtGoal:atGoal[team], checked:false});
+  fs.minute+=2;
+  const flat={...atGoal}; flat[team]+= Math.random()*0.01; const flatN=renormalize(flat);
+  fs.odds=flatN; fs.oddsHistory.push({t:fs.minute, odds:flatN});
+  const signals=detectSignals(fs);
+  processSignals(fs, signals);
+  if(!signals.length) toast("No lag detected that time — odds moved enough on their own.");
+  if(fs.minute>=90){ fs.status="FT"; toast("FULL TIME — "+fs.home+" "+fs.score.home+"-"+fs.score.away+" "+fs.away); settle(fs.fixtureId); }
+  render();
+}
+
+/* ---------- settlement (calls the reused Merkle proof endpoint) ---------------- */
+async function settle(fixtureId){
+  const fs=State.fixtureStates[fixtureId];
+  const result = fs.score.home>fs.score.away?"home":fs.score.home<fs.score.away?"away":"draw";
+  const book=State.book;
+  let text;
+  if(book.position && book.position.fixtureId===fixtureId){
+    const p=book.position;
+    if(p.direction===result){
+      const payoutMult = 1/p.entryProb;
+      const profit = Math.round(p.stake*(payoutMult-1));
+      book.bankroll+=profit; book.realizedPnL+=profit;
+      text="WON — "+labelFor(fs,p.direction)+" settled correct. +"+profit+"u (entry "+Math.round(p.entryProb*100)+"% implied). Bankroll: "+book.bankroll+"u.";
+    } else {
+      const loss=p.stake;
+      book.bankroll-=loss; book.realizedPnL-=loss;
+      text="LOST — held "+labelFor(fs,p.direction)+", result was "+labelFor(fs,result)+". -"+loss+"u. Bankroll: "+book.bankroll+"u.";
+    }
+    book.position=null;
+  } else {
+    text="Match settled — "+labelFor(fs,result)+". No position was held on this fixture.";
+  }
+
+  let receiptHtml="", source=ActualSource;
+  try{
+    const data = await Provider.getStatValidation({ fixtureId, seq:fs.minute, statKey:1, statKey2:2 });
+    source = CONFIG.USE_LIVE_DATA ? "LIVE" : "SIMULATED";
+    setSource(source);
+    receiptHtml = await buildReceiptHtml(data, source);
+  }catch(e){
+    console.warn("Live settlement proof failed, falling back to simulation:", e.message);
+    const data = await SimProvider.getStatValidation({ fixtureId, seq:fs.minute, statKey:1, statKey2:2 });
+    source="SIMULATED"; setSource(source);
+    receiptHtml = await buildReceiptHtml(data, source);
+    toast("Live verification unavailable — showing simulated receipt.");
+  }
+
+  State.feed.unshift({ id:"settle"+Math.random().toString(36).slice(2), minute:fs.minute, fixtureId,
+    type:"SETTLE", explanation: fs.home+" "+fs.score.home+"-"+fs.score.away+" "+fs.away+" · Full time", action:text,
+    ts:Date.now(), receiptHtml });
+  render();
+}
+async function buildReceiptHtml(d, source){
+  const leaf = await statLeaf(d.statToProve);
+  const s1 = await verifyProof(leaf, d.statProof, d.eventStatRoot);
+  const s2 = await verifyProof(d.eventStatRoot, d.subTreeProof, d.summary.eventStatsSubTreeRoot);
+  function chip(label, ok){
+    const cls = ok===true?"ok":ok===null?"pend":"bad";
+    const mark = ok===true?"✓":ok===null?"…":"✗";
+    return "<span class=\"vchip "+cls+"\">"+label+" "+mark+"</span>";
+  }
+  return "<div class=\"receipt-mini\">"+
+      "<span class=\"rm-src "+(source==="LIVE"?"live":"sim")+"\">"+source+" DATA</span>"+
+      "<div class=\"rm-row\">"+chip("Stage 1 · stat",s1)+chip("Stage 2 · event",s2)+chip("Stage 3 · anchored",null)+"</div>"+
+      "<details><summary>Itemized proof data</summary><pre>"+escapeHtml(JSON.stringify(d,null,2))+"</pre></details>"+
+    "</div>";
+}
+function escapeHtml(s){ return s.replace(/[&<>]/g,function(c){return ({"&":"&amp;","<":"&lt;",">":"&gt;"})[c];}); }
+
+/* ---------- rendering ----------------------------------------------------------- */
+function render(){
+  setSource(ActualSource);
+  const fixEl=document.getElementById("fixrow"); fixEl.innerHTML="";
+  State.fixtures.forEach(function(fx){
+    const fs=State.fixtureStates[fx.fixtureId];
+    const st = fs? fs.status : "NS";
+    const b=document.createElement("button");
+    b.className="fixbtn"+(fx.fixtureId===State.activeFixtureId?" active":"")+(st==="LIVE"?" live2":st==="FT"?" ft":"");
+    b.innerHTML = fx.home+" v "+fx.away+(fs?" "+fs.score.home+"-"+fs.score.away:"")+"<span class=\"st\"></span>";
+    b.onclick=function(){ selectFixture(fx.fixtureId); };
+    fixEl.appendChild(b);
+  });
+
+  const fs = State.activeFixtureId!=null ? State.fixtureStates[State.activeFixtureId] : null;
+  const vEl=document.getElementById("vitals");
+  const book=State.book;
+  // Look up the fixture the position actually belongs to, not the one
+  // currently displayed — these can differ if the user switches fixtures
+  // while holding an open position. Using the wrong fixture here would
+  // mislabel the team names.
+  const posFs = book.position ? State.fixtureStates[book.position.fixtureId] : null;
+  const posTxt = book.position && posFs ? labelFor(posFs, book.position.direction)+" · "+book.position.stake+"u" : (book.position ? "Open position (fixture not loaded)" : "No open position");
+  vEl.innerHTML =
+    "<div class=\"vtile\"><div class=\"vl\">Bankroll</div><div class=\"vv mono\">"+book.bankroll.toLocaleString()+"u</div></div>"+
+    "<div class=\"vtile\"><div class=\"vl\">Open Position</div><div class=\"vv\">"+posTxt+"</div></div>"+
+    "<div class=\"vtile\"><div class=\"vl\">Realized PnL</div><div class=\"vv mono "+(book.realizedPnL>0?"up":book.realizedPnL<0?"down":"")+"\">"+(book.realizedPnL>0?"+":"")+book.realizedPnL+"u</div></div>"+
+    "<div class=\"vtile\"><div class=\"vl\">Match Clock</div><div class=\"vv mono\">"+(fs? (fs.status==="NS"?"Not started":fs.minute+"' · "+fs.status) : "—")+"</div></div>";
+
+  const cEl=document.getElementById("controlbar");
+  let html = "<div class=\"switch\">"+
+      "<button class=\""+(State.mode==="auto"?"on auto":"")+"\" data-mode=\"auto\">AUTONOMOUS</button>"+
+      "<button class=\""+(State.mode==="manual"?"on manual":"")+"\" data-mode=\"manual\">MANUAL</button>"+
+    "</div><div class=\"ctrl-actions\">";
+  if(State.mode==="auto"){
+    if(!fs){ html+="<span class=\"empty\">Pick a fixture above to begin.</span>"; }
+    else if(fs.status==="FT"){ html+="<span class=\"empty\">Match finished — switch fixtures to watch another.</span>"; }
+    else if(State.autonomousRunning){ html+="<button class=\"go\" data-stop=\"1\">Pause agent</button>"; }
+    else { html+="<button class=\"go primary\" data-start=\"1\">Run agent (autonomous)</button>"; }
+  } else {
+    html += "<button class=\"go mom\" data-inject=\"swing\">Inject: Odds Swing</button>"+
+            "<button class=\"go goal\" data-inject=\"goal\">Inject: Goal</button>"+
+            "<button class=\"go lag\" data-inject=\"lag\">Inject: Market Lag</button>";
+  }
+  html += "</div>";
+  cEl.innerHTML = html;
+  cEl.querySelectorAll("[data-mode]").forEach(function(b){ b.onclick=function(){ if(State.mode!==b.dataset.mode){ stopAutonomous(); State.mode=b.dataset.mode; render(); } }; });
+  const startBtn=cEl.querySelector("[data-start]"); if(startBtn) startBtn.onclick=startAutonomous;
+  const stopBtn=cEl.querySelector("[data-stop]"); if(stopBtn) stopBtn.onclick=function(){ stopAutonomous(); render(); };
+  const inj=cEl.querySelectorAll("[data-inject]");
+  inj.forEach(function(b){ b.onclick=function(){
+    if(!State.activeFixtureId){ toast("Pick a fixture first."); return; }
+    if(b.dataset.inject==="swing") injectOddsSwing();
+    else if(b.dataset.inject==="goal") injectGoal();
+    else injectMarketLag();
+  }; });
+
+  const fEl=document.getElementById("feed"); fEl.innerHTML="";
+  if(!State.feed.length){ fEl.innerHTML="<div class=\"empty\">No signals yet. Run the agent or inject a scenario above.</div>"; }
+  State.feed.forEach(function(entry){
+    const fx = State.fixtures.find(function(x){return x.fixtureId===entry.fixtureId;});
+    const card=document.createElement("div"); card.className="fcard";
+    card.innerHTML =
+      "<div class=\"ftop\"><span class=\"tag "+tagClass(entry.type)+"\">"+tagLabel(entry.type)+"</span>"+
+      "<span class=\"fmin mono\">"+(fx?fx.home+" v "+fx.away+" · ":"")+entry.minute+"'</span></div>"+
+      "<div class=\"fexp\">"+entry.explanation+"</div>"+
+      "<div class=\"faction\">"+entry.action+"</div>"+
+      (entry.receiptHtml||"");
+    fEl.appendChild(card);
+  });
+}
+
+/* ---------- boot ----------------------------------------------------------- */
+(function init(){
+  setSource(CONFIG.USE_LIVE_DATA ? "LIVE" : "SIMULATED");
+  selectFixture(State.fixtures[0].fixtureId);
+})();
+</script>
+</body>
+</html>

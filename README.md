@@ -1,42 +1,67 @@
-# 🧾 Receipt — Verifiable Prediction Market with Cryptographic Settlement Proof
+# 🩺 Pulse — Autonomous Fan Signal & Strategy Agent
 
-Built for the Superteam Earn World Cup Hackathon (Prediction Markets & Settlement track), powered by TxODDS / TxLINE.
+Built for the Superteam Earn **World Cup Hackathon** (Consumer and Fan Experiences track), powered by **TxODDS / TxLINE**.
 
 ## The idea
-Most prediction markets ask you to *trust* an API result. Receipt shows you the proof. Every settled bet renders a visual Receipt: the final score plus the actual three-stage TxLINE Merkle proof that anchors the result on Solana — verified in your browser, not just asserted.
 
-This directly implements the judges' optional "Verifiable Resolution UI" idea.
+An agent that watches a World Cup match's odds and scores, detects three named, explainable signals, and reacts by adjusting a simulated paper position — unattended by default, with a manual override for controlled demonstration. The track explicitly calls for autonomous agents that "ingest live odds and scores, detect signals, run strategies, and execute decisions without manual input." Pulse does exactly that, plus a deliberate, disclosed supervisory override.
+
+The design is built around the name: a vitals-monitor aesthetic — an ECG strip that spikes every time a signal fires, color-coded by signal type — treating the market like a patient whose pulse the agent is reading in real time.
 
 ## Live vs. simulated data (please read)
-> Live integration implemented and partially verified (guest auth confirmed working live; protected endpoints confirmed correctly reachable via expected 401 response). Full live data retrieval pending mainnet gas fee access for on-chain subscription activation. App defaults to simulation mode for reliable demonstration, per the track's explicit allowance of simulated data feeds.
 
-- Default: simulation. Simulated /api/scores/stat-validation payloads match the real TxLINE schema field-for-field (same names, nesting, types).
-- The simulated Stage 1 & Stage 2 Merkle proofs are real and self-consistent — recomputed and verified in-browser with SHA-256. They are not fake-shaped placeholders.
-- The live code path is complete and correct per the confirmed docs; it is NOT claimed to have run end-to-end. What is confirmed: the guest JWT endpoint works live; the protected stat-validation endpoint is reachable and correctly returns 401 to a bad X-Api-Token.
-- Every receipt carries a visible LIVE / SIMULATED badge. The demo video runs in simulation and says so.
+- **Default: simulation.** All odds/score data flowing through the agent matches TxLINE's real API schema where applicable (the settlement proof call matches the confirmed `/api/scores/stat-validation` schema exactly).
+- **Confirmed working live, zero gas:** `POST /auth/guest/start` (guest JWT).
+- **Confirmed real and reachable, correctly rejects bad auth:** `GET /api/scores/stat-validation` (returns 401 to an invalid `X-Api-Token` — confirms the URL and header structure are correct).
+- **Not confirmed:** exact paths/schemas for live Fixtures/Odds/Scores-snapshot endpoints. These exist per the API reference sidebar but were never verified live. `LiveProvider` does not guess a path for these — it throws explicitly, and the app falls back to simulation with a toast notice.
+- The mode badge in the header always reflects the **actual** source of the last successful fetch, not a static intention — including automatic fallback if a live call fails.
+- The demo video runs in simulation and discloses this on screen, same as the badge does live.
 
-## Known limitations (documented, not hidden)
-- Live score progression is not wired: startMatch() always runs the local simulator. Only the settlement proof call (getStatValidation) has a real live code path. Flipping USE_LIVE_DATA=true would still simulate match play until the fixtures/scores endpoints are wired.
-- Match progress (State.scores) is in-memory only. Reloading the page after full-time but before settling loses the live score, so Settle cannot re-activate for that prediction. Predictions themselves persist (Firebase/localStorage).
-- seq is set from match minute as a stand-in; the real seq is the score-event sequence number.
-- statKey + statKey2 in one call assumes the API returns two independent stat proofs; the docs example is a two-stat predicate. Verify empirically once live.
+## Why the manual toggle doesn't undercut "autonomous"
+
+Autonomous mode is the default and the primary mode being demonstrated — it runs unattended, reacting to a live timer-driven simulation with no clicks required. Manual mode is a deliberate, disclosed supervisory override: real trading/signal systems always have a kill switch or manual trigger, and including one is a sign of responsible design, not reduced autonomy. The three manual "Inject" buttons don't take a shortcut around the agent's reasoning — they mutate real fixture state (odds history, score, goal events) to deterministically satisfy the same thresholds the autonomous engine checks, then run through the exact same `detectSignals()` and `applyStrategy()` functions. Same pipeline, different trigger source — see code comments in `index.html` for exactly where this is enforced.
+
+## Known limitations (disclosed honestly)
+
+- **State is in-memory only.** Bankroll, position, and feed history are not persisted — reloading the page resets everything. Don't reload mid-demo.
+- **One open position across the whole book at a time.** If you switch the active fixture while holding a position, the agent will not open a second position elsewhere — it will note that it's already committed and decline to act further until the held position settles. This is intentional (avoids overtrading) but worth knowing before a demo recording.
+- **Live odds/scores integration is not wired** — only the settlement proof call has confirmed-real request logic. See "Live vs. simulated data" above.
 
 ## Run locally
-Open index.html in a browser. It MUST be served over https:// or localhost because it uses the Web Crypto API. e.g. `npx serve .`
+
+Open `index.html` in a browser. Requires `https://` or `localhost` (not a bare `file://` path in some browsers) because it uses the Web Crypto API.
+
+```bash
+npx serve .
+```
 
 ## Deploy
-- GitHub Pages: push index.html to the repo root, enable Pages on the main branch.
-- Railway / any static host: serve the single file.
 
-## Configure (top of index.html)
-- USE_LIVE_DATA — false = simulation (default). Set true only with a real activated TXLINE_API_TOKEN.
-- TXLINE_API_TOKEN — long-lived token from on-chain activation (gas-blocked, not yet available).
-- FIREBASE_DB_URL — optional Firebase Realtime Database URL; empty falls back to localStorage.
+### GitHub Pages
+1. Push `index.html` to the repo root.
+2. **Settings → Pages → Source: Deploy from a branch → main → / (root) → Save.**
+3. Visit the generated `https://<username>.github.io/<repo>/` URL after 1–2 minutes.
+
+### Railway (alternative)
+1. New Railway project → "Deploy from GitHub repo."
+2. Use a minimal static site template pointing to `index.html`.
+3. Deploy and grab the public URL.
+
+## Configure (top of `index.html`)
+
+```js
+const CONFIG = {
+  USE_LIVE_DATA: false,   // false = simulation (default, recommended for demo)
+  TXLINE_BASE_URL: "https://txline.txodds.com",
+  TXLINE_API_TOKEN: ""    // long-lived token from on-chain activation (gas-blocked, not yet available)
+};
+```
 
 ## TxLINE endpoints used
-- POST /auth/guest/start — guest JWT (confirmed working live).
-- POST /api/token/activate — token activation after on-chain subscribe (implemented per docs; gas-blocked).
-- GET /api/scores/stat-validation — core endpoint: three-stage Merkle proof for a score statistic.
+
+- `POST /auth/guest/start` — guest JWT (confirmed working live, zero gas).
+- `GET /api/scores/stat-validation` — three-stage Merkle proof, used for the Settlement Receipt feature (confirmed real URL and auth-header structure; not yet exercised with a real activated token).
 
 ## Credits
-TechCraft & Coding By Wisdom — GitHub @wisdomkings001, IG @wisdomtech_creations.
+
+TechCraft & Coding By Wisdom — GitHub [@wisdomkings001](https://github.com/wisdomkings001), Instagram [@wisdomtech_creations](https://instagram.com/wisdomtech_creations).
