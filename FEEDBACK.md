@@ -1,6 +1,0 @@
-# TxLINE API feedback (for submission)
-
-- Guest auth is excellent — POST /auth/guest/start returns a working JWT with zero friction and no gas. Great onboarding.
-- Endpoint design is clean and verifiable — the three-stage Merkle proof on /api/scores/stat-validation is a genuinely strong primitive for trust-minimized settlement, and the 401 behavior on a bad X-Api-Token made it easy to confirm the request shape was correct.
-- Main friction: free-tier activation requires mainnet gas. The free service levels (1 and 12) need no TxL tokens, but activation still requires an on-chain subscribe transaction on mainnet, which requires SOL for gas. For builders without funded mainnet wallets, this blocks getting a real apiToken even for the free tier. Suggestions: a devnet activation path, a faucet/sponsored-gas option for hackathon participants, or a short-lived sandbox apiToken issued directly from guest auth for evaluation.
-- Docs gap: ProofNode field shape and the global batch root's location in the stat-validation response weren't fully specified; documenting these would let clients verify all three stages without a separate batch-proof call.
